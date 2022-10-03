@@ -51,6 +51,11 @@ contract BridgeProposal {
         return true;
     }
 
+    function _isPassed(address to, uint256 amount, string memory transactionId) internal view returns (bool) {
+        bytes32 proposalCode = keccak256(abi.encodePacked(to, amount, transactionId));
+        return passed[proposalCode];
+    }
+
     function _checkPass(address to, uint256 amount, string memory transactionId, bytes32 proposalCode) private returns (bool) {
         if (!passed[proposalCode] && voteCount[proposalCode] >= voteThreshold) {
             passed[proposalCode] = true;

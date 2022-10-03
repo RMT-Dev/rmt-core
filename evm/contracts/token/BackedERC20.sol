@@ -20,6 +20,7 @@ contract BackedERC20 is Initializable, ERC20PermitUpgradeable, ERC20PausableUpgr
         string memory symbol
     ) internal onlyInitializing {
         __ERC20_init_unchained(name, symbol);
+        __EIP712_init_unchained(name, "1");
         __Pausable_init_unchained();
         __BackedERC20_init_unchained(name, symbol);
     }

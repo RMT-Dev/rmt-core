@@ -19,6 +19,8 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
     mapping(string => bool) public transactionMinted;
     uint256 public minimumBurn;
 
+    bool public autoMint;
+
     mapping(uint256 => bool) public accountApproved;
 
     event BridgeMint(address indexed to, uint256 amount, string transactionId);
@@ -32,6 +34,7 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
 
     function __FiatBridge_init_unchained(IBackedERC20 _token) internal onlyInitializing {
         token = _token;
+        autoMint = true;  // no chain limits preventing this, and is more convenient
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
     }
 
@@ -63,7 +66,7 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
         string memory transactionId
     ) external onlyBridger {
         require(!transactionMinted[transactionId], "FiatBridge: transaction minted");
-        if (_vote(to, amount, transactionId)) {
+        if (_vote(to, amount, transactionId) && autoMint) {
             _performMint(to, amount, transactionId);
         }
     }
@@ -88,12 +91,38 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
      */
     function passBridgeMint(address to, uint256 amount, string memory transactionId) external onlyBridger {
         require(!transactionMinted[transactionId], "FiatBridge: transaction minted");
-        if (_pass(to, amount, transactionId)) {
+        if (_pass(to, amount, transactionId) && autoMint) {
+            _performMint(to, amount, transactionId);
+        }
+    }
+
+    /**
+     * Mint the tokens for an already-passed bridge proposal. This function exists
+     * to split the complexity of a passed proposal, to separate the bookkeeping
+     * of proposal voting and the actual minting of tokens. Because passing and
+     * minting are logically equivalent actions, there are no invocation restrictionss
+     * on this function (it may be called by anyone, not just a bridger).
+     *
+     * The propossal (to, amount, transactionId) must already have passed.
+     *
+     * Postcondition: Mint the indicated quantity of tokens to the indicated
+     * recipient. If minting fees are applied, they will be taken out of the
+     * quantity minted, with the remainder going to `to`.
+     *
+     * Emits:
+     *   BridgeMint
+     */
+    function performMint(address to, uint256 amount, string memory transactionId) external {
+        require(!transactionMinted[transactionId], "FiatBridge: transaction minted");
+        if (_isPassed(to, amount, transactionId)) {
             _performMint(to, amount, transactionId);
         }
     }
 
     function _performMint(address to, uint256 amount, string memory transactionId) internal {
+        // record minting (to avoid recurrence)
+        transactionMinted[transactionId] = true;
+
         // tokens are minted to fee recipients; the remainder to the client.
         (uint256 fee, uint256 mintAmount) = calculateMintFee(amount);
         uint256 unusedFee = fee;
@@ -111,8 +140,7 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
         // mint to client
         token.mint(to, mintAmount + unusedFee);
 
-        // record minting
-        transactionMinted[transactionId] = true;
+        // emit BridgeMint event
         emit BridgeMint(to, amount, transactionId);
     }
 
@@ -264,6 +292,23 @@ contract FiatBridge is Initializable, AccessControlEnumerableUpgradeable, Conver
      */
     function setVoteThreshold(uint256 _threshold) external onlyAdmin {
         _setVoteThreshold(_threshold);
+    }
+
+    /**
+     * Sets "AutoMint" behavior, which causes tokens to be minted automatically
+     * upon a proposal passing. If 'false',
+     *
+     * Caller must have DEFAULT_ADMIN_ROLE.
+     *
+     * Postcondition: any future `bridgeMint` proposals will pass once they meet
+     * or exceed this new vote threshold. Any pending proposals that now meet
+     * the threshold may be passed with `passBridgeMint`. If the theshold is 0,
+     * no proposals will pass until it is set to a nonzero value.
+     *
+     * Emits: ProposalThresholdChanged
+     */
+    function setAutoMint(bool _autoMint) external onlyAdmin {
+        autoMint = _autoMint;
     }
 
     /**

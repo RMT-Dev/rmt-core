@@ -21,33 +21,48 @@ contract ConversionFee {
     event MintFeeChange(uint256 fixedFee, uint256 ratioNumerator, uint256 ratioDenominator);
     event BurnFeeChange(uint256 fixedFee, uint256 ratioNumerator, uint256 ratioDenominator);
     event FeeRecipientSharesChange(address indexed recipient, uint256 shares, uint256 totalShares);
-    event FeeRecipientsCleared();
-
+    
     function _setFeeRecipients(address[] memory recipients, uint256[] memory shares) internal {
         require(recipients.length == shares.length, "ConversionFee: array lengths must match");
 
+        // clear the recipient list and note those removed. It is more efficient
+        // to work back-to-front when removing items from the recipient set.
+        address[] memory removedRecipients = new address[](_feeRecipients.length());
+        uint256 removedCount = 0;
         while (_feeRecipients.length() > 0) {
-            address recipient = _feeRecipients.at(0);
+            address recipient = _feeRecipients.at(_feeRecipients.length() - 1);
             _feeShares[recipient] = 0;
             _feeRecipients.remove(recipient);
+            // note for events
+            removedRecipients[removedCount++] = recipient;
         }
-        emit FeeRecipientsCleared();
 
+        // set new recipients
         uint256 total = 0;
         for (uint256 i = 0; i < recipients.length; i++) {
             address recipient = recipients[i];
-            uint256 recipientShares = shares[i];
+            uint256 share = shares[i];
 
-            require(recipientShares > 0, "ConversionFee: must set shares > 0");
-            require(_feeShares[recipient] == 0, "ConversionFee: must not repeat recipients");
+            require(!_feeRecipients.contains(recipient), "ConversionFee: must not repeat recipients");
+            require(share > 0, "ConversionFee: must set shares > 0");
 
             _feeRecipients.add(recipient);
-            _feeShares[recipient] = recipientShares;
-            total += recipientShares;
-
-            emit FeeRecipientSharesChange(recipient, recipientShares, total);
+            _feeShares[recipient] = share;
+            total += share;
         }
         totalFeeShares = total;
+
+        // emit events
+        for (uint256 i = 0; i < removedCount; i++) {
+            address recipient = removedRecipients[i];
+            if (!_feeRecipients.contains(recipient)) {
+                // actually removed
+                emit FeeRecipientSharesChange(recipient, 0, total);
+            }
+        }
+        for (uint256 i = 0; i < recipients.length; i++) {
+            emit FeeRecipientSharesChange(recipients[i], shares[i], total);
+        }
     }
 
     function _setFeeRecipientShares(address recipient, uint256 shares) internal {
